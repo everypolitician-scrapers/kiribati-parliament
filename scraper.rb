@@ -28,17 +28,15 @@ def scrape_list(url)
       who, area, _ = line.split(/[\(\)]/)
       prefix, name = who.match(/^(H.E|Hon. Dr|Hon|[MD]r?|Mr?s?|Mr Mr)[\. ](.*)$/).captures
       data = { 
-        # id: "%s-%s" % [who.downcase.gsub(/[[:space:]]+/,'-'), first_seen],
         name: name.sub('Attorney General','').tidy,
         prefix: prefix, 
         party: party,
         area: area.to_s.sub(/^MP /,'').tidy,
         gender: prefix.match(/Mr?s/) ? 'female' : prefix.include?('Mr') ? 'male' : '',
         term: 10,
-        # source: url.to_s,
+        source: url.to_s,
       }
-      puts data
-      # ScraperWiki.save_sqlite([:id, :term], data)
+      ScraperWiki.save_sqlite([:name, :term], data)
     end
   end
 end
