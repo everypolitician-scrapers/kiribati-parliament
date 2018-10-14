@@ -36,6 +36,7 @@ def scrape_list(url)
         term: 10,
         source: url.to_s,
       }
+      puts data.compact.sort.to_h if ENV['MORPH_DEBUG']
       ScraperWiki.save_sqlite([:name, :term], data)
     end
   end
