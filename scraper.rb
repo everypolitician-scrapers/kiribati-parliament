@@ -13,29 +13,80 @@ def noko_for(url)
   Nokogiri::HTML(open(url).read)
 end
 
-def scrape_list(url)
-  noko = noko_for(url)
-  noko.css('#content-inner ol').each do |ol|
-    party = ol.xpath('preceding-sibling::p/strong').last.text.tidy
-    puts party.to_s.cyan
-    ol.css('li').each do |li|
-      line = li.css('strong').count.zero? ? li.text.tidy : li.css('strong').text.tidy
-      who, area, _ = line.split(/[\(\)]/)
-      prefix, name = who.match(/^(H.E|Hon. Dr|Hon|[MD]r?|Mr?s?|Mr Mr)[\. ](.*)$/).captures
-      data = { 
-        name: name.sub('Attorney General','').tidy,
-        prefix: prefix, 
-        party: party,
-        area: area.to_s.sub(/^MP /,'').tidy,
-        gender: prefix.match(/Mr?s/) ? 'female' : prefix.include?('Mr') ? 'male' : '',
-        term: 10,
-        source: url.to_s,
-      }
-      puts data.compact.sort.to_h if ENV['MORPH_DEBUG']
-      ScraperWiki.save_sqlite([:name, :term], data)
+class MembersList < Scraped::HTML
+  field :members do
+    noko.css('#content pre').map(&:text).each_slice(2).flat_map do |party, members|
+      cleanparty = party.gsub(/\(.*?\)/, '').tidy
+      members.lines.map { |line| fragment(line => MemberLine).to_h.merge(party: cleanparty) }
     end
   end
 end
 
-ScraperWiki.sqliteexecute('DROP TABLE data') rescue nil
-scrape_list('http://www.parliament.gov.ki/content/party-members')
+class MemberLine < Scraped::HTML
+  field :id do
+    name.downcase.tr(' ', '-')
+  end
+
+  field :name do
+    name_parts.name
+  end
+
+  field :gender do
+    name_parts.gender
+  end
+
+  field :honorific_prefix do
+    name_parts.prefix
+  end
+
+  field :area do
+    lineparts.last.split('-').first.tidy
+  end
+
+  private
+
+  def lineparts
+    noko.split(/  +/, 2)
+  end
+
+  def name_parts
+    fragment lineparts.first.tidy => MemberName
+  end
+end
+
+class MemberName < Scraped::HTML
+  field :prefix do
+    partitioned.first.join(' ')
+  end
+
+  field :name do
+    partitioned.last.join(' ')
+  end
+
+  field :gender do
+    return 'male' if (prefixes & MALE_PREFIXES).any?
+    return 'female' if (prefixes & FEMALE_PREFIXES).any?
+  end
+
+  private
+
+  FEMALE_PREFIXES  = %w[mrs miss ms].freeze
+  MALE_PREFIXES    = %w[mr].freeze
+  OTHER_PREFIXES   = %w[dr].freeze
+  PREFIXES         = FEMALE_PREFIXES + MALE_PREFIXES + OTHER_PREFIXES
+
+  def partitioned
+    words.partition { |w| PREFIXES.include? w.chomp('.').downcase }
+  end
+
+  def prefixes
+    partitioned.first.map { |w| w.downcase.chomp('.') }
+  end
+
+  def words
+    noko.split(/\s+/)
+  end
+end
+
+url = 'http://www.parliament.gov.ki/party-members/'
+Scraped::Scraper.new(url => MembersList).store(:members)
